@@ -5,4 +5,15 @@
 
 export { formatMetaLine, appendMeta, type MetaEnvelope } from "./meta.js";
 
-export const __version__ = "0.1.0";
+export {
+  CANONICAL_EMIT_NAME,
+  CANONICAL_LIB_PACKAGE,
+  LINT_RULE_ID,
+  lintBlade,
+  type AuditSurfaceVerdict,
+  type LintResult,
+  type LintSummary,
+  type ToolVerdict,
+} from "./lint.js";
+
+export const __version__ = "0.2.0";
