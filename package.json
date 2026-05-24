@@ -1,0 +1,59 @@
+{
+  "name": "stallari-mcp-helpers",
+  "version": "0.1.0",
+  "description": "Canonical helpers for Stallari-conformant TypeScript MCP servers — _meta audit envelope builder per DD-338 wire contract. Drop-in primitives for any Node MCP author targeting Stallari's contract surface.",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "stallari",
+    "mcp",
+    "helpers",
+    "audit-envelope"
+  ],
+  "author": "Piers Dawson-Damer",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Groupthink-dev/stallari-mcp-helpers-ts.git"
+  },
+  "homepage": "https://github.com/Groupthink-dev/stallari-mcp-helpers-ts",
+  "bugs": {
+    "url": "https://github.com/Groupthink-dev/stallari-mcp-helpers-ts/issues"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@vitest/coverage-v8": "^2.1.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
