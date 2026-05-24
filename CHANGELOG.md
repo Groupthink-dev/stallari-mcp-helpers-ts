@@ -26,5 +26,5 @@ Initial release. Sister package to [stallari-mcp-helpers (Python)](https://pypi.
 
 ### Notes
 - Public API frozen during `0.x` series only against breaking changes within a minor; subject to refinement until `1.0.0`.
-- See [DD-338](https://github.com/Groupthink-dev) for the design record.
+- The wire contract is specified by Stallari internal design record DD-338 (private; the public summary surfaces gradually as the contract stabilises).
 - `1.0.0` cut once consumer blade-mcps have shipped against `0.x` for >30 days with no API churn.
