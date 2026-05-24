@@ -223,6 +223,203 @@ describe("appendMeta", () => {
   });
 });
 
+describe("formatMetaLine — write-tier optional fields (DD-338 Phase D.1)", () => {
+  // Each of rows_affected / target_id / write_durability /
+  // response_timestamp follows omit-when-undefined discipline. Verified
+  // present + absent for each, plus a kitchen-sink and a write-tier-only
+  // case (matched_total + returned absent — pure write handler).
+
+  it("case D1: rows_affected present → emitted; absent → omitted", () => {
+    const present = formatMetaLine({
+      matched_total: 1,
+      returned: 1,
+      filtered_by: [],
+      latency_ms: 1,
+      redactions: [],
+      next_cursor: null,
+      rows_affected: 7,
+    });
+    expect(present).toContain('"rows_affected":7');
+
+    const absent = formatMetaLine({
+      matched_total: 1,
+      returned: 1,
+      filtered_by: [],
+      latency_ms: 1,
+      redactions: [],
+      next_cursor: null,
+    });
+    expect(absent).not.toContain("rows_affected");
+  });
+
+  it("case D2: target_id present → emitted; absent → omitted", () => {
+    const present = formatMetaLine({
+      latency_ms: 1,
+      filtered_by: [],
+      redactions: [],
+      next_cursor: null,
+      target_id: "zone-123",
+    });
+    expect(present).toContain('"target_id":"zone-123"');
+
+    const absent = formatMetaLine({
+      latency_ms: 1,
+      filtered_by: [],
+      redactions: [],
+      next_cursor: null,
+    });
+    expect(absent).not.toContain("target_id");
+  });
+
+  it("case D3: write_durability present → emitted as string; absent → omitted", () => {
+    const present = formatMetaLine({
+      latency_ms: 1,
+      filtered_by: [],
+      redactions: [],
+      next_cursor: null,
+      write_durability: "central",
+    });
+    expect(present).toContain('"write_durability":"central"');
+
+    const absent = formatMetaLine({
+      latency_ms: 1,
+      filtered_by: [],
+      redactions: [],
+      next_cursor: null,
+    });
+    expect(absent).not.toContain("write_durability");
+  });
+
+  it("case D3b: write_durability accepts canonical values (edge / central / replicated) — typed as plain string, no enum enforcement at lib layer", () => {
+    for (const value of ["edge", "central", "replicated"]) {
+      const line = formatMetaLine({
+        latency_ms: 1,
+        filtered_by: [],
+        redactions: [],
+        next_cursor: null,
+        write_durability: value,
+      });
+      expect(line).toContain(`"write_durability":"${value}"`);
+    }
+  });
+
+  it("case D4: response_timestamp present → emitted; absent → omitted", () => {
+    const present = formatMetaLine({
+      latency_ms: 1,
+      filtered_by: [],
+      redactions: [],
+      next_cursor: null,
+      response_timestamp: "2026-05-24T12:34:56+10:00",
+    });
+    expect(present).toContain(
+      '"response_timestamp":"2026-05-24T12:34:56+10:00"',
+    );
+
+    const absent = formatMetaLine({
+      latency_ms: 1,
+      filtered_by: [],
+      redactions: [],
+      next_cursor: null,
+    });
+    expect(absent).not.toContain("response_timestamp");
+  });
+
+  it("case D5 (kitchen sink): all read + write fields together emit in canonical key order", () => {
+    const line = formatMetaLine({
+      matched_total: 99,
+      returned: 25,
+      filtered_by: ["scope=work"],
+      latency_ms: 123,
+      redactions: ["pii_email"],
+      next_cursor: "page_2",
+      rows_affected: 3,
+      target_id: "record-abc",
+      write_durability: "replicated",
+      response_timestamp: "2026-05-24T12:34:56+10:00",
+      error_notes: ["truncated"],
+    });
+    expect(line).toBe(
+      '_meta: {"matched_total":99,"returned":25,"filtered_by":["scope=work"],"latency_ms":123,"redactions":["pii_email"],"next_cursor":"page_2","rows_affected":3,"target_id":"record-abc","write_durability":"replicated","response_timestamp":"2026-05-24T12:34:56+10:00","error_notes":["truncated"]}',
+    );
+  });
+
+  it("case D6 (write-tier only): matched_total + returned omitted; write-tier fields present", () => {
+    const line = formatMetaLine({
+      latency_ms: 15,
+      filtered_by: [],
+      redactions: [],
+      next_cursor: null,
+      rows_affected: 1,
+      target_id: "zone-123",
+      write_durability: "central",
+    });
+    // Read-tier fields absent — these are no longer required.
+    expect(line).not.toContain("matched_total");
+    expect(line).not.toContain('"returned":');
+    // Write-tier fields present, in canonical order; always-present
+    // fields emitted with their empty defaults.
+    expect(line).toBe(
+      '_meta: {"filtered_by":[],"latency_ms":15,"redactions":[],"next_cursor":null,"rows_affected":1,"target_id":"zone-123","write_durability":"central"}',
+    );
+  });
+
+  it("case D7 (key order, all-fields): canonical key order locked across langs", () => {
+    const line = formatMetaLine({
+      matched_total: 1,
+      returned: 1,
+      filtered_by: ["x"],
+      latency_ms: 1,
+      redactions: ["r"],
+      next_cursor: "c",
+      rows_affected: 2,
+      target_id: "t",
+      write_durability: "edge",
+      response_timestamp: "2026-01-01T00:00:00+00:00",
+      error_notes: ["n"],
+    });
+    // Verify key order via substring index — each subsequent key must
+    // appear after the previous one. This guards against silent key
+    // reordering across helpers, langs, or future JS engine changes.
+    const order = [
+      "matched_total",
+      "returned",
+      "filtered_by",
+      "latency_ms",
+      "redactions",
+      "next_cursor",
+      "rows_affected",
+      "target_id",
+      "write_durability",
+      "response_timestamp",
+      "error_notes",
+    ];
+    let lastIdx = -1;
+    for (const key of order) {
+      const idx = line.indexOf(`"${key}":`);
+      expect(idx, `key ${key} should appear in canonical order`).toBeGreaterThan(
+        lastIdx,
+      );
+      lastIdx = idx;
+    }
+  });
+
+  it("case D8 (backwards-compat read-tier shape unchanged): pre-D.1 callers produce identical wire output", () => {
+    // The exact line that cloudflare-blade-mcp v0.6.0 + vultr-blade-mcp
+    // pre-D.1 callers produce must continue to be emitted byte-for-byte.
+    const line = formatMetaLine({
+      matched_total: 10,
+      returned: 5,
+      filtered_by: [],
+      latency_ms: 42,
+      redactions: [],
+      next_cursor: null,
+    });
+    expect(line).toBe(
+      '_meta: {"matched_total":10,"returned":5,"filtered_by":[],"latency_ms":42,"redactions":[],"next_cursor":null}',
+    );
+  });
+});
+
 describe("formatMetaLine — assembler regex contract (case 14)", () => {
   // The assembler (DD-287) extracts `_meta` via the regex
   // `\n\n_meta: (\{.*\})$` matched at end-of-string. The line produced
@@ -296,6 +493,34 @@ describe("formatMetaLine — assembler regex contract (case 14)", () => {
         latency_ms: 123,
         redactions: ["pii_email", "pii_phone"],
         next_cursor: "page_2",
+        error_notes: ["truncated"],
+      },
+    ],
+    [
+      "write-tier-only envelope (D.1)",
+      {
+        latency_ms: 15,
+        filtered_by: [],
+        redactions: [],
+        next_cursor: null,
+        rows_affected: 1,
+        target_id: "zone-123",
+        write_durability: "central",
+      },
+    ],
+    [
+      "kitchen-sink read + write fields (D.1)",
+      {
+        matched_total: 99,
+        returned: 25,
+        filtered_by: ["scope=work"],
+        latency_ms: 123,
+        redactions: ["pii_email"],
+        next_cursor: "page_2",
+        rows_affected: 3,
+        target_id: "record-abc",
+        write_durability: "replicated",
+        response_timestamp: "2026-05-24T12:34:56+10:00",
         error_notes: ["truncated"],
       },
     ],
