@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-24
+
+DD-338 Phase B — adds the S-AUD-001 static lint substrate. Sister to the Python lint at byte-identical JSON shape.
+
+### Added
+- `lint` module — AST-based audit-surface honesty linter for Stallari-conformant TS blade-mcps. Public entry `lintBlade(sourceRoot, catalogEntry)` walks the blade's TypeScript source tree, identifies tool registrations (`server.registerTool(...)`, `server.tool(...)`, object-config shape), and verifies whether each tool handler transitively calls `appendMeta` from `stallari-mcp-helpers`. Resolution graph follows direct imports, alias imports, re-exports, local consts, and wrapper functions up to 3 hops deep.
+- `stallari-mcp-lint` console-script — invoked as `stallari-mcp-lint <blade-source-root> --catalog <catalog.json> [--output <sidecar.json>] [--strict]`. `--strict` exits non-zero on any over-declared / under-declared verdict (indeterminate does NOT trip strict).
+- Public surface adds `lintBlade`, `LintResult`, `ToolVerdict`, `AuditSurfaceVerdict`, `LintSummary`, `CANONICAL_EMIT_NAME`, `CANONICAL_LIB_PACKAGE`, `LINT_RULE_ID`.
+- `typescript` promoted from devDependency to runtime dependency (the lint depends on the TS compiler API for AST parsing).
+
+### Notes
+- Output JSON shape is byte-identical (modulo whitespace) to the Python sister so the unified `stallari-conformance verify --static` CLI can dispatch by runtime and aggregate verdicts uniformly.
+- Verdicts: `match`, `over-declared`, `under-declared`, `indeterminate`. `indeterminate` is explicit "lint can't tell" — strict mode never trips on it.
+
 ## [0.1.0] - 2026-05-24
 
 Initial release. Sister package to [stallari-mcp-helpers (Python)](https://pypi.org/project/stallari-mcp-helpers/) — same wire contract, same `_meta` envelope shape, idiomatic TypeScript API.

@@ -1,7 +1,7 @@
 {
   "name": "stallari-mcp-helpers",
-  "version": "0.1.0",
-  "description": "Canonical helpers for Stallari-conformant TypeScript MCP servers — _meta audit envelope builder per DD-338 wire contract. Drop-in primitives for any Node MCP author targeting Stallari's contract surface.",
+  "version": "0.2.0",
+  "description": "Canonical helpers for Stallari-conformant TypeScript MCP servers — _meta audit envelope builder per DD-338 wire contract, plus S-AUD-001 static lint (DD-338 Phase B). Drop-in primitives for any Node MCP author targeting Stallari's contract surface.",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
@@ -12,8 +12,11 @@
       "import": "./dist/index.js"
     }
   },
+  "bin": {
+    "stallari-mcp-lint": "./dist/cli.js"
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/cli.js",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -38,8 +41,13 @@
     "stallari",
     "mcp",
     "helpers",
-    "audit-envelope"
+    "audit-envelope",
+    "lint",
+    "static-analysis"
   ],
+  "dependencies": {
+    "typescript": "^5.6.0"
+  },
   "author": "Piers Dawson-Damer",
   "license": "MIT",
   "repository": {
@@ -53,7 +61,6 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^2.1.0",
-    "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   }
 }
