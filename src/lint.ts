@@ -88,12 +88,24 @@ export interface LintResult {
 
 interface ToolFn {
   name: string;
-  // The function/arrow-function node whose body is the handler.
+  // The function/arrow-function node whose body is the handler. When the
+  // handler was passed as a named identifier (not an inline function),
+  // this is the registration call node itself (placeholder) and
+  // `handlerRef` carries the identifier text for later resolution.
   body: ts.Node;
+  // Set when the registration passes the handler as a named identifier
+  // (e.g. `server.registerTool("x", cfg, importedHandler)` or
+  // `{ name: "x", handler: importedHandler }`). The verdict pass resolves
+  // this to a function body via `resolveHandlerBody`; unresolvable refs
+  // yield `indeterminate` — never a false over-declared (AUD-04-13).
+  handlerRef?: string;
 }
 
 interface ModuleInfo {
   path: string;
+  // POSIX-style relative module key (see pathToModuleKey) — needed by
+  // resolveModuleRef when chasing named-handler imports at verdict time.
+  key: string;
   sourceFile: ts.SourceFile;
   // Names bound in this module that resolve to canonical appendMeta.
   // Populated lazily by the propagation pass.
@@ -160,8 +172,8 @@ export async function lintBlade(
     const loc = toolLocations.get(toolName);
     const verdict =
       loc === undefined
-        ? buildVerdict(toolName, declared, null, null)
-        : buildVerdict(toolName, declared, loc.fn, loc.module);
+        ? buildVerdict(toolName, declared, null, null, modules, root)
+        : buildVerdict(toolName, declared, loc.fn, loc.module, modules, root);
 
     tools[toolName] = { audit_surface: verdict };
     if (verdict.result === "match") counts.match_count++;
@@ -239,6 +251,7 @@ function buildResolver(root: string): Map<string, ModuleInfo> {
     const moduleKey = pathToModuleKey(filePath, root);
     const info: ModuleInfo = {
       path: filePath,
+      key: moduleKey,
       sourceFile,
       canonicalNames: new Set(),
       tools: new Map(),
@@ -446,10 +459,22 @@ function extractToolRegistration(node: ts.Node): ToolFn | null {
         return { name: toolName, body: arg };
       }
     }
-    // No inline handler found — but the registration is still by name,
-    // so we record an empty body. We use the call node itself as a
-    // placeholder so `bodyCallsCanonical` returns false (which is the
-    // correct outcome — no inline handler = no emission detected).
+    // No inline handler — the handler may have been passed as a named
+    // identifier (`server.registerTool("x", cfg, importedHandler)`).
+    // Scan backwards for an Identifier argument (skip arg 0, the name);
+    // record it as a handler reference for resolution at verdict time
+    // (AUD-04-13 — a named handler must be resolved and inspected, not
+    // hard-failed as over-declared).
+    for (let i = args.length - 1; i >= 1; i--) {
+      const arg = args[i];
+      if (!arg) continue;
+      if (ts.isIdentifier(arg)) {
+        return { name: toolName, body: node, handlerRef: arg.text };
+      }
+    }
+    // Genuinely no function and no identifier handler — record a
+    // placeholder (the call node). The verdict pass treats this as
+    // indeterminate (emission status unknown).
     return { name: toolName, body: node };
   }
 
@@ -457,6 +482,7 @@ function extractToolRegistration(node: ts.Node): ToolFn | null {
   if (first && ts.isObjectLiteralExpression(first)) {
     let toolName: string | null = null;
     let handler: ts.Node | null = null;
+    let handlerRef: string | null = null;
     for (const prop of first.properties) {
       if (!ts.isPropertyAssignment(prop)) continue;
       const propName = propertyKey(prop);
@@ -469,14 +495,68 @@ function extractToolRegistration(node: ts.Node): ToolFn | null {
         const v = prop.initializer;
         if (ts.isArrowFunction(v) || ts.isFunctionExpression(v)) {
           handler = v;
+        } else if (ts.isIdentifier(v)) {
+          // `handler: importedHandler` — named reference (AUD-04-13).
+          handlerRef = v.text;
         }
       }
     }
     if (toolName !== null && handler !== null) {
       return { name: toolName, body: handler };
     }
+    if (toolName !== null && handlerRef !== null) {
+      return { name: toolName, body: node, handlerRef };
+    }
   }
 
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Named-handler resolution (AUD-04-13)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a named handler reference to a function body node, following:
+ *   (a) module-level function declarations / arrow consts in the same
+ *       module (`module.functions`);
+ *   (b) named imports — chased to the origin module via `resolveModuleRef`
+ *       and looked up in the origin's `functions`;
+ *   (c) one level of `const X = Y` aliasing (`module.aliases`).
+ *
+ * Returns the resolved node together with its OWNING module — emission must
+ * be checked against the owning module's `canonicalNames`, not the
+ * registering module's. Returns `null` when the reference cannot be
+ * statically resolved (defined out-of-tree, dynamic shape, …) — the caller
+ * must yield `indeterminate`, never a false over-declared.
+ */
+function resolveHandlerBody(
+  ref: string,
+  module: ModuleInfo,
+  modules: Map<string, ModuleInfo>,
+  root: string,
+): { node: ts.Node; owner: ModuleInfo } | null {
+  const candidates: string[] = [ref];
+  const aliased = module.aliases.get(ref);
+  if (aliased !== undefined && aliased !== ref) {
+    candidates.push(aliased);
+  }
+  for (const name of candidates) {
+    const local = module.functions.get(name);
+    if (local !== undefined) {
+      return { node: local, owner: module };
+    }
+    const imp = module.imports.get(name);
+    if (imp !== undefined) {
+      const origin = resolveModuleRef(imp.originModule, module.key, modules, root);
+      if (origin !== null) {
+        const target = origin.functions.get(imp.originalName);
+        if (target !== undefined) {
+          return { node: target, owner: origin };
+        }
+      }
+    }
+  }
   return null;
 }
 
@@ -626,6 +706,8 @@ function buildVerdict(
   declared: string,
   fn: ToolFn | null,
   module: ModuleInfo | null,
+  modules: Map<string, ModuleInfo>,
+  root: string,
 ): AuditSurfaceVerdict {
   if (declared === "none") {
     return {
@@ -649,7 +731,55 @@ function buildVerdict(
         "imperatively in a shape this lint does not statically resolve)",
     };
   }
-  const emits = bodyCallsCanonical(fn.body, module.canonicalNames);
+
+  // Tri-state emission decision (AUD-04-13): true / false / unknown.
+  // Unknown — a named handler reference that could not be resolved, or a
+  // registration with no detectable handler at all — yields
+  // `indeterminate` regardless of the declared surface (symmetric for
+  // declared=structured and declared=minimal); it must never produce a
+  // false over-declared.
+  let emits: boolean;
+  if (fn.handlerRef !== undefined) {
+    const ref = fn.handlerRef;
+    if (module.canonicalNames.has(ref)) {
+      // The named handler is itself canonical (a wrapper whose body calls
+      // appendMeta, propagated by the canonical-name pass).
+      emits = true;
+    } else {
+      const resolved = resolveHandlerBody(ref, module, modules, root);
+      if (resolved === null) {
+        return {
+          declared,
+          actual: "indeterminate",
+          result: "indeterminate",
+          detail:
+            `tool handler "${ref}" is a named reference that could not ` +
+            "be statically resolved to a function body (defined " +
+            "out-of-tree or in a shape this lint does not resolve) — " +
+            "emission status unknown",
+        };
+      }
+      // Emission is checked against the OWNING module's canonical names.
+      emits = bodyCallsCanonical(resolved.node, resolved.owner.canonicalNames);
+    }
+  } else if (
+    ts.isArrowFunction(fn.body) ||
+    ts.isFunctionExpression(fn.body) ||
+    ts.isFunctionDeclaration(fn.body)
+  ) {
+    emits = bodyCallsCanonical(fn.body, module.canonicalNames);
+  } else {
+    // Placeholder body (registration call node) — no inline handler and
+    // no named handler reference detected.
+    return {
+      declared,
+      actual: "indeterminate",
+      result: "indeterminate",
+      detail:
+        `registration found for tool "${toolName}" but no inline handler ` +
+        "or named handler reference detected — emission status unknown",
+    };
+  }
   const actual: "structured" | "minimal" = emits ? "structured" : "minimal";
 
   if (declared === "structured") {

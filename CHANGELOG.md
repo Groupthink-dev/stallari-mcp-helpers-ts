@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-12
+
+DD-386 helper-lib hardening — coordinated cross-language release following the Python canonical's v0.4.0 locked contract. Fixes audit findings AUD-04-12 (envelope parity + collation) and AUD-04-13 (lint false over-declared), and closes the AUD-04-08 defect class (token-absent HTTP serves unauthenticated) at the shared-lib layer.
+
+**Parity correction:** v0.3.0's claimed cross-language byte parity was inaccurate — this package emitted an 11-key envelope (missing `domain_hints`) while the Python canonical carried 12, and `filtered_by` used JS default `.sort()` (UTF-16 code-unit order) which diverges from the locked code-point collation on astral-plane input. Parity holds from the v0.4.0 trio (Python + TypeScript + Swift) onward, locked by a shared golden fixture.
+
+### Added
+- `MetaEnvelope.domain_hints?: Record<string, string>` — 12th envelope key (12-key parity with the Python canonical v0.4.0). Omit when undefined OR empty object; keys emitted sorted by Unicode code point. (AUD-04-12)
+- `codePointCompare(a, b)` — exported lexicographic comparator over Unicode CODE POINTS (Python `sorted()` semantics, no normalisation). This is the locked canonical collation for all sorted `_meta` output. JS default `.sort()` compares UTF-16 code units and disagrees on astral-plane input (e.g. U+FFFD must sort before U+1F600 under code-point order; the default sort compares U+1F600's lead surrogate 0xD83D first and gets it backwards). (AUD-04-12)
+- `transport` module — canonical HTTP transport policy, framework-neutral, Node stdlib only (AUD-04-08 class closure). `resolveHttpTransport({envPrefix, defaultPort, env?, tokenVar?})` reads `{PREFIX}_MCP_TOKEN` / `_MCP_HOST` / `_MCP_PORT` / `_MCP_ALLOW_NONLOOPBACK` and throws `TransportPolicyError` when the token is unset/empty (HTTP mode refuses to serve without a bearer token — never warn-and-serve), on wildcard binds (`0.0.0.0`/`::`/`[::]`/`""`, refused unconditionally), on non-loopback binds without `ALLOW_NONLOOPBACK` being the exact string `"true"` (`strictEnvBool`), and on non-integer / out-of-range ports. `checkBearer` performs a constant-time, length-safe comparison (sha256 digests + `crypto.timingSafeEqual`); `requireBearer` wraps a Node `http` handler with a 401 + `WWW-Authenticate: Bearer` gate that never echoes the token, and both throw `TransportPolicyError` on an empty expected token.
+- Golden parity fixture (`tests/parity-golden.test.ts`) — byte-locked v0.4.0 wire-contract literals identical across the Python and Swift sister repos, including the collation-hostile U+FFFD-vs-U+1F600 pair and code-point-sorted `domain_hints` keys.
+
+### Changed
+- `formatMetaLine` sorts `filtered_by` with `codePointCompare` instead of JS default `.sort()`; canonical key order is now 12 keys ending `..., error_notes, domain_hints`. Output for envelopes without `domain_hints` and without astral/BMP-boundary `filtered_by` entries is byte-identical to 0.3.0.
+- S-AUD-001 lint: tool registrations passing the handler as a **named identifier** (`server.registerTool("x", cfg, importedHandler)` or object-config `handler: importedHandler`) are now resolved to the referenced function body — same-module functions, one alias hop, and named imports chased to the owning module (emission checked against the owning module's resolution graph). Previously these fell through to a placeholder whose emission check was always false, producing a hard false "over-declared". Unresolvable references (defined out-of-tree, dynamic shapes) and registrations with no detectable handler now yield `indeterminate` (which `--strict` tolerates) — never a false over-declared. Symmetric for `declared=minimal`. (AUD-04-13)
+
 ## [0.3.0] - 2026-05-24
 
 DD-338 Phase D.1 — additive extension of `MetaEnvelope` for write-tier fields. Coordinated cross-language release; Python + Swift sister packages cut `0.3.0` with byte-identical wire shape.

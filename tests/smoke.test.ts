@@ -9,6 +9,6 @@ import { describe, expect, it } from "vitest";
 describe("package smoke", () => {
   it("exports __version__ matching package.json", async () => {
     const mod = await import("../src/index.js");
-    expect(mod.__version__).toBe("0.3.0");
+    expect(mod.__version__).toBe("0.4.0");
   });
 });

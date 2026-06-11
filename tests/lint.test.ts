@@ -500,6 +500,167 @@ server.registerTool("t_ok", { title: "x" }, async (_args: any) => {
 });
 
 // ---------------------------------------------------------------------------
+// Named-handler resolution (AUD-04-13 — DD-386 helper-lib hardening)
+// ---------------------------------------------------------------------------
+
+describe("S-AUD-001 — named handler references (AUD-04-13)", () => {
+  it("N1: registerTool(name, cfg, namedHandler) with same-module handler calling appendMeta → match", async () => {
+    const server = `
+import { appendMeta, formatMetaLine } from "stallari-mcp-helpers";
+
+declare const server: { registerTool: (n: string, c: any, h: any) => void };
+
+async function namedHandler(_args: any) {
+  const meta = formatMetaLine({
+    matched_total: 1, returned: 1, filtered_by: [],
+    latency_ms: 1, redactions: [], next_cursor: null,
+  });
+  return { content: [{ type: "text", text: appendMeta("body", meta) }] };
+}
+
+server.registerTool("t_named_local", { title: "x" }, namedHandler);
+`;
+    const root = writeBlade(tmpRoot, "bladeN1", { "server.ts": server });
+    const result = await lintBlade(
+      root,
+      catalogFor("blade-n1", [["t_named_local", "structured"]]),
+    );
+    const v = result.tools["t_named_local"]?.audit_surface;
+    expect(v?.result).toBe("match");
+    expect(v?.actual).toBe("structured");
+  });
+
+  it("N2: named handler imported from a sibling module → match", async () => {
+    const server = `
+import { siblingHandler } from "./handlers.js";
+
+declare const server: { registerTool: (n: string, c: any, h: any) => void };
+
+server.registerTool("t_named_sibling", { title: "x" }, siblingHandler);
+`;
+    const handlers = `
+import { appendMeta, formatMetaLine } from "stallari-mcp-helpers";
+
+export async function siblingHandler(_args: any) {
+  const meta = formatMetaLine({
+    matched_total: 1, returned: 1, filtered_by: [],
+    latency_ms: 1, redactions: [], next_cursor: null,
+  });
+  return { content: [{ type: "text", text: appendMeta("body", meta) }] };
+}
+`;
+    const root = writeBlade(tmpRoot, "bladeN2", {
+      "server.ts": server,
+      "handlers.ts": handlers,
+    });
+    const result = await lintBlade(
+      root,
+      catalogFor("blade-n2", [["t_named_sibling", "structured"]]),
+    );
+    const v = result.tools["t_named_sibling"]?.audit_surface;
+    expect(v?.result).toBe("match");
+  });
+
+  it("N3: named handler that does NOT call appendMeta → over-declared (body resolved, genuinely silent)", async () => {
+    const server = `
+declare const server: { registerTool: (n: string, c: any, h: any) => void };
+
+async function silentHandler(_args: any) {
+  return { content: [{ type: "text", text: "no envelope" }] };
+}
+
+server.registerTool("t_named_silent", { title: "x" }, silentHandler);
+`;
+    const root = writeBlade(tmpRoot, "bladeN3", { "server.ts": server });
+    const result = await lintBlade(
+      root,
+      catalogFor("blade-n3", [["t_named_silent", "structured"]]),
+    );
+    const v = result.tools["t_named_silent"]?.audit_surface;
+    expect(v?.result).toBe("over-declared");
+    expect(v?.actual).toBe("minimal");
+  });
+
+  it("N4: named handler not defined anywhere in the tree → indeterminate, NOT over-declared", async () => {
+    const server = `
+import { mysteryHandler } from "some-external-package";
+
+declare const server: { registerTool: (n: string, c: any, h: any) => void };
+
+server.registerTool("t_named_mystery", { title: "x" }, mysteryHandler);
+`;
+    const root = writeBlade(tmpRoot, "bladeN4", { "server.ts": server });
+    const result = await lintBlade(
+      root,
+      catalogFor("blade-n4", [["t_named_mystery", "structured"]]),
+    );
+    const v = result.tools["t_named_mystery"]?.audit_surface;
+    expect(v?.result).toBe("indeterminate");
+    expect(v?.actual).toBe("indeterminate");
+    expect(v?.detail).toContain("could not be statically resolved");
+    expect(result.summary.indeterminate_count).toBe(1);
+    expect(result.summary.over_declared_count).toBe(0);
+  });
+
+  it("N5: declared=minimal + unresolvable named handler → also indeterminate (symmetry)", async () => {
+    const server = `
+import { mysteryHandler } from "some-external-package";
+
+declare const server: { registerTool: (n: string, c: any, h: any) => void };
+
+server.registerTool("t_named_mystery_min", { title: "x" }, mysteryHandler);
+`;
+    const root = writeBlade(tmpRoot, "bladeN5", { "server.ts": server });
+    const result = await lintBlade(
+      root,
+      catalogFor("blade-n5", [["t_named_mystery_min", "minimal"]]),
+    );
+    const v = result.tools["t_named_mystery_min"]?.audit_surface;
+    expect(v?.result).toBe("indeterminate");
+  });
+
+  it("N6: object-config { name, handler: namedRef } captures the reference → match", async () => {
+    const server = `
+import { appendMeta, formatMetaLine } from "stallari-mcp-helpers";
+
+declare const server: { registerTool: (cfg: any) => void };
+
+async function cfgHandler(_args: any) {
+  const meta = formatMetaLine({
+    matched_total: 1, returned: 1, filtered_by: [],
+    latency_ms: 1, redactions: [], next_cursor: null,
+  });
+  return { content: [{ type: "text", text: appendMeta("body", meta) }] };
+}
+
+server.registerTool({ name: "t_cfg_named", handler: cfgHandler });
+`;
+    const root = writeBlade(tmpRoot, "bladeN6", { "server.ts": server });
+    const result = await lintBlade(
+      root,
+      catalogFor("blade-n6", [["t_cfg_named", "structured"]]),
+    );
+    expect(result.tools["t_cfg_named"]?.audit_surface.result).toBe("match");
+  });
+
+  it("N7: registration with no inline handler and no identifier → indeterminate (was false over-declared)", async () => {
+    const server = `
+declare const server: { registerTool: (n: string, c: any) => void };
+
+server.registerTool("t_no_handler", { title: "x" });
+`;
+    const root = writeBlade(tmpRoot, "bladeN7", { "server.ts": server });
+    const result = await lintBlade(
+      root,
+      catalogFor("blade-n7", [["t_no_handler", "structured"]]),
+    );
+    const v = result.tools["t_no_handler"]?.audit_surface;
+    expect(v?.result).toBe("indeterminate");
+    expect(v?.detail).toContain("no inline handler or named handler reference");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Module-surface constants
 // ---------------------------------------------------------------------------
 

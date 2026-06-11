@@ -20,11 +20,13 @@ All three packages stay in lockstep on the wire shape — `meta_envelope(...)` i
 
 ## What this is
 
-One small module:
+Three small modules:
 
-- **`meta`** — renders the canonical `_meta: {...}` JSON-tail block the Stallari assembler lifts into its `ContextPacket.provenance` audit trail. Locked encoding: tight JSON separators, alphabetically-sorted `filtered_by`, required/optional field discipline matching the DD-338 wire contract.
+- **`meta`** — renders the canonical `_meta: {...}` JSON-tail block the Stallari assembler lifts into its `ContextPacket.provenance` audit trail. Locked encoding: tight JSON separators, code-point-sorted `filtered_by` and `domain_hints` keys (Python `sorted()` semantics via the exported `codePointCompare` — not JS default `.sort()`), required/optional field discipline matching the DD-338 wire contract (12-key v0.4.0 shape).
+- **`lint`** — the S-AUD-001 static audit-surface honesty linter + `stallari-mcp-lint` CLI.
+- **`transport`** — canonical HTTP transport policy (token-required bearer auth, loopback-default bind, wildcard-bind refusal). Framework-neutral, Node stdlib only. Use this instead of hand-rolling bearer/bind handling: token absent ⇒ refuse to serve (never warn-and-serve), `0.0.0.0`/`::` never, non-loopback only behind an explicit `{PREFIX}_MCP_ALLOW_NONLOOPBACK=true` opt-in, constant-time bearer comparison.
 
-This package does **not** ship MCP-server scaffolding, tool registration, HTTP/IPC, inference, or domain-attribution primitives. It's deliberately small.
+This package does **not** ship MCP-server scaffolding, tool registration, an HTTP server, inference, or domain-attribution primitives. It's deliberately small — the `transport` module is policy (config validation + an auth-gate wrapper), not a server.
 
 For Python MCP authors, the sister package is [stallari-mcp-helpers on PyPI](https://pypi.org/project/stallari-mcp-helpers/) — same wire contract, same field-presence discipline.
 
@@ -113,17 +115,37 @@ Stallari's conformance harness verifies these claims against your actual tool be
 
 ```typescript
 interface MetaEnvelope {
-  matched_total: number;
-  returned: number;
-  latency_ms: number;
-  filtered_by: string[];     // alphabetically sorted in output
-  redactions: string[];      // required, defaults to []
+  matched_total?: number;     // optional (read-tier)
+  returned?: number;          // optional (read-tier)
+  filtered_by: string[];      // code-point sorted in output
+  latency_ms: number;         // required, rounded
+  redactions: string[];       // required, defaults to []
   next_cursor: string | null; // required, null is valid
-  error_notes?: string[];    // optional, omitted when None/empty
+  rows_affected?: number;     // optional (write-tier)
+  target_id?: string;         // optional (write-tier)
+  write_durability?: string;  // optional ("edge" | "central" | "replicated")
+  response_timestamp?: string; // optional, ISO8601
+  error_notes?: string[];     // optional, omitted when undefined/empty
+  domain_hints?: Record<string, string>; // optional, omitted when undefined/empty;
+                                         // keys emitted code-point sorted
 }
 
 function formatMetaLine(meta: MetaEnvelope): string;
 function appendMeta(payload: string, metaLine: string): string;
+function codePointCompare(a: string, b: string): number; // canonical collation
+
+// transport — canonical HTTP transport policy (AUD-04-08 class closure)
+class TransportPolicyError extends Error {}
+function strictEnvBool(value: string | undefined): boolean; // exactly "true"
+interface HttpTransportConfig { host: string; port: number; token: string }
+function resolveHttpTransport(opts: {
+  envPrefix: string;
+  defaultPort: number;
+  env?: Record<string, string | undefined>;
+  tokenVar?: string;
+}): HttpTransportConfig; // throws TransportPolicyError on policy violations
+function checkBearer(authorizationHeader: string | undefined, expectedToken: string): boolean;
+function requireBearer(expectedToken: string, handler: (req, res) => void): (req, res) => void;
 ```
 
 ## Versioning
