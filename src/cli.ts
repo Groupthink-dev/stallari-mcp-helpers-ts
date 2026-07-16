@@ -13,8 +13,9 @@
 // verdict. Indeterminate verdicts do not trip strict mode — they are
 // "lint can't tell" rather than "lint says wrong".
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { LINT_RULE_ID, lintBlade, type LintResult } from "./lint.js";
 
@@ -143,13 +144,12 @@ export async function runCli(argv: string[]): Promise<number> {
 }
 
 // ESM-friendly main-module check.
-// We compare process.argv[1] resolved against the module URL's pathname.
+// We compare realpaths so npm .bin symlinks resolve to this module.
 const isMain = (() => {
   try {
     const argvPath = process.argv[1];
     if (!argvPath) return false;
-    const moduleUrl = new URL(import.meta.url);
-    return resolve(argvPath) === resolve(moduleUrl.pathname);
+    return realpathSync(resolve(argvPath)) === realpathSync(fileURLToPath(import.meta.url));
   } catch {
     return false;
   }

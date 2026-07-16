@@ -30,4 +30,4 @@ export {
   type ToolVerdict,
 } from "./lint.js";
 
-export const __version__ = "0.4.0";
+export const __version__ = "0.4.1";
