@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-16
+
+### Fixed
+- `stallari-mcp-lint` no longer silently exits when invoked through the npm bin symlink: its ESM `isMain` guard now compares realpaths, with e2e coverage for symlinked and direct bin execution (AUD-05-39).
+
 ## [0.4.0] - 2026-06-12
 
 DD-386 helper-lib hardening — coordinated cross-language release following the Python canonical's v0.4.0 locked contract. Fixes audit findings AUD-04-12 (envelope parity + collation) and AUD-04-13 (lint false over-declared), and closes the AUD-04-08 defect class (token-absent HTTP serves unauthenticated) at the shared-lib layer.

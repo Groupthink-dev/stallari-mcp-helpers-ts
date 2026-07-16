@@ -1,6 +1,6 @@
 {
   "name": "stallari-mcp-helpers",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Canonical helpers for Stallari-conformant TypeScript MCP servers — _meta audit envelope builder per DD-338 wire contract, plus S-AUD-001 static lint (DD-338 Phase B). Drop-in primitives for any Node MCP author targeting Stallari's contract surface.",
   "type": "module",
   "main": "dist/index.js",
